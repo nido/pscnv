@@ -836,3 +836,19 @@
 #define NV50_PDISPLAY_CURSOR_USER                                    0x00647000
 #define NV50_PDISPLAY_CURSOR_USER_POS_CTRL(i)        ((i) * 0x1000 + 0x00647080)
 #define NV50_PDISPLAY_CURSOR_USER_POS(i)             ((i) * 0x1000 + 0x00647084)
+
+#define NVC0_MEM_CTRLR_COUNT                                         0x00121c74
+#define NVC0_MEM_CTRLR_RAM_AMOUNT                                    0x0010f20c
+
+#define NVC0_PBUS_PRAMIN_OFFSET                                      0x00001700
+#define NVC0_PBUS_BAR1_CHAN                                          0x00001704
+#define NVC0_PBUS_BAR3_CHAN                                          0x00001714
+#define NVC0_PBUS_PEEPHOLE_CHAN                                      0x00001718
+
+#define NVC0_PBUS                                                    0x00080000
+#define NVC0_PBUS_PCI                                                0x00088000
+
+#define NVC0_PFIFO_POLL_AREA                                         0x00002254
+#define NVC0_PFIFO_PLAY_LIST                                         0x00002270
+#define NVC0_PFIFO_CTX_INST(i)                                (0x3000 + (i) * 8)
+#define NVC0_PFIFO_CTX_STAT(i)                                (0x3004 + (i) * 8)

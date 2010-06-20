@@ -35,13 +35,35 @@
 #define NV50_VM_SPTE_COUNT	0x20000
 #define NV50_VM_LPTE_COUNT	0x2000
 
+#define NVC0_SPAGE_SHIFT	12
+#define NVC0_LPAGE_SHIFT	17
+#define NVC0_SPAGE_MASK         0x00fff
+#define NVC0_LPAGE_MASK         0x1ffff
+
+#define NVC0_VM_PDE_COUNT	0x2000
+#define NVC0_VM_BLOCK_SIZE	0x8000000
+#define NVC0_VM_BLOCK_MASK	0x7ffffff
+#define NVC0_VM_SPTE_COUNT	(NVC0_VM_BLOCK_SIZE >> NVC0_SPAGE_SHIFT)
+#define NVC0_VM_LPTE_COUNT	(NVC0_VM_BLOCK_SIZE >> NVC0_LPAGE_SHIFT)
+
+#define NVC0_PDE_HT_SIZE 32
+#define NVC0_PDE_HASH(n) (n % NVC0_PDE_HT_SIZE)
+
 PSCNV_RB_HEAD(pscnv_vm_maptree, pscnv_vm_mapnode);
+
+struct pscnv_ptab {
+	struct list_head head;
+	unsigned int pde;
+	struct pscnv_vo *vo[2];
+};
 
 struct pscnv_vspace {
 	int vid;
 	struct drm_device *dev;
 	struct mutex lock;
 	int isbar;
+	struct list_head ptht[NVC0_PDE_HT_SIZE];
+	struct pscnv_vo *pd;
 	struct pscnv_vo *pt[NV50_VM_PDE_COUNT];
 	struct list_head chan_list;
 	struct pscnv_vm_maptree maps;
@@ -63,6 +85,7 @@ struct pscnv_vm_mapnode {
 #define PSCNV_ENGINE_PGRAPH 0x00000001
 
 extern int pscnv_vm_init(struct drm_device *);
+extern int nvc0_vm_init(struct drm_device *);
 extern int pscnv_vm_takedown(struct drm_device *);
 extern struct pscnv_vspace *pscnv_vspace_new(struct drm_device *);
 extern void pscnv_vspace_free(struct pscnv_vspace *);
@@ -84,6 +107,15 @@ int pscnv_ioctl_vspace_map(struct drm_device *dev, void *data,
 						struct drm_file *file_priv);
 int pscnv_ioctl_vspace_unmap(struct drm_device *dev, void *data,
 						struct drm_file *file_priv);
+
+/* from nvc0_vm.c */
+int nvc0_bar3_flush(struct drm_device *dev);
+int nvc0_tlb_flush(struct pscnv_vspace *vs);
+int nvc0_vspace_do_unmap(struct pscnv_vspace *vs,
+			 uint64_t offset, uint64_t size);
+int nvc0_vspace_do_map(struct pscnv_vspace *vs,
+		       struct pscnv_vo *vo, uint64_t offset);
+int nvc0_vm_init(struct drm_device *dev);
 
 /* needs vm_mutex held */
 struct pscnv_vspace *pscnv_get_vspace(struct drm_device *dev, struct drm_file *file_priv, int vid);

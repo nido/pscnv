@@ -31,7 +31,6 @@
 
 uint32_t pscnv_ramht_hash(struct pscnv_ramht *ramht, uint32_t handle) {
 	uint32_t hash = 0;
-	int i;
 	while (handle) {
 		hash ^= handle & ((1 << ramht->bits) - 1);
 		handle >>= ramht->bits;
@@ -44,16 +43,22 @@ int pscnv_ramht_insert(struct pscnv_ramht *ramht, uint32_t handle, uint32_t cont
 	uint32_t hash = pscnv_ramht_hash(ramht, handle);
 	uint32_t start = hash * 8;
 	uint32_t pos = start;
+
 	if (pscnv_ramht_debug >= 2)
 		NV_INFO(ramht->vo->dev, "Handle %x hash %x\n", handle, hash);
+
 	spin_lock (&ramht->lock);
 	do {
 		if (!nv_rv32(ramht->vo, ramht->offset + pos + 4)) {
-			nv_wv32(ramht->vo, ramht->offset + pos, handle);
+			nv_wv32(ramht->vo, ramht->offset + pos + 0, handle);
 			nv_wv32(ramht->vo, ramht->offset + pos + 4, context);
 			spin_unlock (&ramht->lock);
 			if (pscnv_ramht_debug >= 1)
-				NV_INFO(ramht->vo->dev, "Adding RAMHT entry for object %x at %x, context %x\n", handle, pos, context);
+				NV_INFO(ramht->vo->dev, "Adding RAMHT entry for"
+					"object %x at %x, context %x (%08x)\n",
+					handle, pos, context,
+					nv_rv32(ramht->vo,
+						ramht->offset + pos + 4));
 			return 0;
 		}
 		pos += 8;

@@ -67,7 +67,8 @@ pscnv_vspace_flush(struct pscnv_vspace *vs, int unit) {
 }
 
 static int
-pscnv_vspace_do_unmap (struct pscnv_vspace *vs, uint64_t offset, uint64_t length) {
+nv50_vspace_do_unmap (struct pscnv_vspace *vs, uint64_t offset, uint64_t length)
+{
 	int ret;
 	while (length) {
 		uint32_t pgnum = offset / 0x1000;
@@ -96,7 +97,7 @@ pscnv_vspace_do_unmap (struct pscnv_vspace *vs, uint64_t offset, uint64_t length
 }
 
 static int
-pscnv_vspace_fill_pd_slot (struct pscnv_vspace *vs, uint32_t pdenum) {
+nv50_vspace_fill_pd_slot (struct pscnv_vspace *vs, uint32_t pdenum) {
 	struct drm_nouveau_private *dev_priv = vs->dev->dev_private;
 	struct list_head *pos;
 	int i;
@@ -127,7 +128,7 @@ pscnv_vspace_fill_pd_slot (struct pscnv_vspace *vs, uint32_t pdenum) {
 }
 
 static int
-pscnv_vspace_do_map (struct pscnv_vspace *vs, struct pscnv_vo *vo, uint64_t offset) {
+nv50_vspace_do_map (struct pscnv_vspace *vs, struct pscnv_vo *vo, uint64_t offset) {
 	struct list_head *pos;
 	int ret;
 	list_for_each(pos, &vo->regions) {
@@ -142,8 +143,8 @@ pscnv_vspace_do_map (struct pscnv_vspace *vs, struct pscnv_vo *vo, uint64_t offs
 			pte |= (uint64_t)vo->tile_flags << 40;
 			pte |= 1; /* present */
 			if (!vs->pt[pdenum])
-				if ((ret = pscnv_vspace_fill_pd_slot (vs, pdenum))) {
-					pscnv_vspace_do_unmap (vs, offset, vo->size);
+				if ((ret = nv50_vspace_fill_pd_slot (vs, pdenum))) {
+					nv50_vspace_do_unmap (vs, offset, vo->size);
 					return ret;
 				}
 			nv_wv32(vs->pt[pdenum], ptenum * 8 + 4, pte >> 32);
@@ -153,8 +154,35 @@ pscnv_vspace_do_map (struct pscnv_vspace *vs, struct pscnv_vo *vo, uint64_t offs
 	return 0;
 }
 
+static int
+nvc0_vspace_init(struct pscnv_vspace *vs)
+{
+	int i;
+
+	NV_DEBUG(vs->dev, "nvc0_vspace_init(%p), allocating pd\n", vs);
+
+	vs->pd = pscnv_vram_alloc(vs->dev, NVC0_VM_PDE_COUNT * 8,
+				  PSCNV_VO_CONTIG, 0, 0xdeadcafe);
+	if (!vs->pd)
+		return -ENOMEM;
+
+	/* shouldn't do that for BAR 3 vspace, then check for errors */
+	pscnv_vspace_map3(vs->pd);
+
+	for (i = 0; i < NVC0_PDE_HT_SIZE; ++i)
+		INIT_LIST_HEAD(&vs->ptht[i]);
+
+	for (i = 0; i < NVC0_VM_PDE_COUNT; ++i) {
+		nv_wv32(vs->pd, i * 8 + 0, 0x0);
+		nv_wv32(vs->pd, i * 8 + 4, 0x0);
+	}
+	return nvc0_bar3_flush(vs->dev);
+}
+
 struct pscnv_vspace *
-pscnv_vspace_new (struct drm_device *dev) {
+pscnv_vspace_new (struct drm_device *dev)
+{
+	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	struct pscnv_vspace *res = kzalloc(sizeof *res, GFP_KERNEL);
 	struct pscnv_vm_mapnode *fmap;
 	if (!res)
@@ -173,7 +201,13 @@ pscnv_vspace_new (struct drm_device *dev) {
 	fmap->start = 0;
 	fmap->size = 1ULL << 40;
 	fmap->maxgap = fmap->size;
+
 	PSCNV_RB_INSERT(pscnv_vm_maptree, &res->maps, fmap);
+
+	if (dev_priv->card_type >= NV_C0 && nvc0_vspace_init(res)) {
+		pscnv_vspace_free(res);
+		return NULL;
+	}
 	return res;
 }
 
@@ -220,13 +254,16 @@ pscnv_vm_init(struct drm_device *dev) {
 	barch = pscnv_chan_new (barvm);
 	if (!barch)
 		return -ENOMEM;
+
+	dev_priv->vm_ramin_base = dev_priv->fb_size;
+
 	nv_wr32(dev, 0x1704, 0x40000000 | barch->vo->start >> 12);
 	bar1dma = pscnv_chan_dmaobj_new(barch, 0x7fc00000, 0, dev_priv->fb_size);
 	bar3dma = pscnv_chan_dmaobj_new(barch, 0x7fc00000, dev_priv->fb_size, dev_priv->ramin_size);
 	nv_wr32(dev, 0x1708, 0x80000000 | bar1dma >> 4);
 	nv_wr32(dev, 0x170c, 0x80000000 | bar3dma >> 4);
-	dev_priv->barvm = barvm;
-	dev_priv->barch = barch;
+	dev_priv->bar3_vm = dev_priv->bar1_vm = barvm;
+	dev_priv->bar3_ch = dev_priv->bar1_ch = barch;
 	mutex_init(&dev_priv->vm_mutex);
 	pscnv_vspace_map3(barch->vo);
 	pscnv_vspace_map3(barvm->pt[0]);
@@ -236,11 +273,11 @@ pscnv_vm_init(struct drm_device *dev) {
 int
 pscnv_vm_takedown(struct drm_device *dev) {
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
-	struct pscnv_vspace *vs = dev_priv->barvm;
-	struct pscnv_chan *ch = dev_priv->barch;
+	struct pscnv_vspace *vs = dev_priv->bar3_vm;
+	struct pscnv_chan *ch = dev_priv->bar3_ch;
 	/* XXX: write me. */
-	dev_priv->barvm = 0;
-	dev_priv->barch = 0;
+	dev_priv->bar3_vm = dev_priv->bar1_vm = NULL;
+	dev_priv->bar3_ch = dev_priv->bar1_ch = NULL;
 	nv_wr32(dev, 0x1708, 0);
 	nv_wr32(dev, 0x170c, 0);
 	nv_wr32(dev, 0x1710, 0);
@@ -331,6 +368,7 @@ pscnv_vspace_map(struct pscnv_vspace *vs, struct pscnv_vo *vo,
 		uint64_t start, uint64_t end, int back,
 		struct pscnv_vm_mapnode **res)
 {
+	struct drm_nouveau_private *dev_priv = vs->dev->dev_private;
 	struct pscnv_vm_mapnode *node;
 	start += 0xfff;
 	start &= ~0xfffull;
@@ -348,18 +386,27 @@ pscnv_vspace_map(struct pscnv_vspace *vs, struct pscnv_vo *vo,
 	if (pscnv_vm_debug >= 1)
 		NV_INFO(vs->dev, "Mapping VO %x/%d at %llx-%llx.\n", vo->cookie, vo->serial, node->start,
 				node->start + node->size);
-	pscnv_vspace_do_map(vs, vo, node->start);
+	if (dev_priv->card_type >= NV_C0)
+		nvc0_vspace_do_map(vs, vo, node->start);
+	else
+		nv50_vspace_do_map(vs, vo, node->start);
 	*res = node;
 	mutex_unlock(&vs->lock);
 	return 0;
 }
 
 static int
-pscnv_vspace_unmap_node_unlocked(struct pscnv_vm_mapnode *node) {
+pscnv_vspace_unmap_node_unlocked(struct pscnv_vm_mapnode *node)
+{
+	struct drm_nouveau_private *dev_priv = node->vspace->dev->dev_private;
+
 	if (pscnv_vm_debug >= 1) {
 		NV_INFO(node->vspace->dev, "Unmapping range %llx-%llx.\n", node->start, node->start + node->size);
 	}
-	pscnv_vspace_do_unmap(node->vspace, node->start, node->size);
+	if (dev_priv->card_type < NV_C0)
+		nv50_vspace_do_unmap(node->vspace, node->start, node->size);
+	else
+		nvc0_vspace_do_unmap(node->vspace, node->start, node->size);
 	if (!node->vspace->isbar) {
 		drm_gem_object_unreference(node->vo->gem);
 	}
@@ -403,20 +450,45 @@ pscnv_vspace_unmap(struct pscnv_vspace *vs, uint64_t start) {
 
 int pscnv_vspace_map1(struct pscnv_vo *vo) {
 	struct drm_nouveau_private *dev_priv = vo->dev->dev_private;
+	uint64_t start, end;
+
 	if (vo->map1)
 		return 0;
-	if (!dev_priv->barvm)
+	if (!dev_priv->bar1_vm)
 		return -ENODEV;
-	return pscnv_vspace_map(dev_priv->barvm, vo, 0, dev_priv->fb_size, 0, &vo->map1);
+
+	NV_DEBUG(vo->dev, "mapping into FB BAR: 0x%08llx, 0x%llx\n",
+		 vo->start, vo->size);
+
+	start = 0;
+	end = dev_priv->fb_size;
+
+	return pscnv_vspace_map(dev_priv->bar1_vm,
+				vo, start, end, 0, &vo->map1);
 }
 
 int pscnv_vspace_map3(struct pscnv_vo *vo) {
 	struct drm_nouveau_private *dev_priv = vo->dev->dev_private;
+	uint64_t start, end;
+
 	if (vo->map3)
 		return 0;
-	if (!dev_priv->barvm)
+	if (!dev_priv->bar3_vm)
 		return -ENODEV;
-	return pscnv_vspace_map(dev_priv->barvm, vo, dev_priv->fb_size, dev_priv->fb_size + dev_priv->ramin_size, 0, &vo->map3);
+
+	if (dev_priv->card_type >= NV_C0) {
+		start = 0;
+		end = dev_priv->ramin_size;
+	} else {
+		start = dev_priv->fb_size;
+		end = start + dev_priv->ramin_size;
+	}
+
+	NV_DEBUG(vo->dev, "mapping into RAMIN: 0x%08llx, 0x%llx\n",
+		 vo->start, vo->size);
+
+	return pscnv_vspace_map(dev_priv->bar3_vm,
+				vo, start, end, 0, &vo->map3);
 }
 
 static struct vm_operations_struct pscnv_vm_ops = {

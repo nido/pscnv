@@ -57,8 +57,11 @@ static int nouveau_init_engine_ptrs(struct drm_device *dev)
 	} else if (dev_priv->card_type == NV_40) {
 		engine->mc.init			= nv40_mc_init;
 		engine->mc.takedown		= nv40_mc_takedown;
-	} else {
+	} else if (dev_priv->card_type < NV_C0) {
 		engine->mc.init			= nv50_mc_init;
+		engine->mc.takedown		= nv50_mc_takedown;
+	} else {
+		engine->mc.init			= nvc0_mc_init;
 		engine->mc.takedown		= nv50_mc_takedown;
 	}
 
@@ -307,6 +310,8 @@ static int nouveau_init_engine_ptrs(struct drm_device *dev)
 		engine->fifo.unload_context	= nv50_fifo_unload_context;
 #endif
 		break;
+	case NV_C0:
+		break;
 	default:
 		NV_ERROR(dev, "NV%02x unsupported\n", dev_priv->chipset);
 		return 1;
@@ -441,19 +446,22 @@ nouveau_card_init(struct drm_device *dev)
 	if (ret)
 		goto out_bios;
 
-	ret = pscnv_vm_init(dev);
-	if (ret)
-		goto out_vram;
-
 	/* PMC */
 	ret = engine->mc.init(dev);
 	if (ret)
-		goto out_vm;
+		goto out_vram;
+
+	if (dev_priv->card_type >= NV_C0)
+		ret = nvc0_vm_init(dev);
+	else
+		ret = pscnv_vm_init(dev);
+	if (ret)
+		goto out_mc;
 
 	/* PTIMER */
 	ret = engine->timer.init(dev);
 	if (ret)
-		goto out_mc;
+		goto out_vm;
 
 	/* PFB */
 	ret = engine->fb.init(dev);
@@ -462,12 +470,20 @@ nouveau_card_init(struct drm_device *dev)
 
 	/* XXX: handle noaccel */
 	/* PFIFO */
-	ret = pscnv_fifo_init(dev);
+	if (dev_priv->card_type < NV_C0)
+		ret = pscnv_fifo_init(dev);
+	else {
+		/* TODO */
+	}
 	if (ret)
 		goto out_fb;
 
 	/* PGRAPH */
-	ret = pscnv_graph_init(dev);
+	if (dev_priv->card_type < NV_C0)
+		ret = pscnv_graph_init(dev);
+	else {
+		/* TODO */
+	}
 	if (ret)
 		goto out_fifo;
 
@@ -528,10 +544,10 @@ out_fb:
 	engine->fb.takedown(dev);
 out_timer:
 	engine->timer.takedown(dev);
+out_vm:
+	pscnv_vm_takedown(dev); /* XXX: changed order with MC */
 out_mc:
 	engine->mc.takedown(dev);
-out_vm:
-	pscnv_vm_takedown(dev);
 out_vram:
 	pscnv_vram_takedown(dev);
 out_bios:
@@ -552,8 +568,11 @@ static void nouveau_card_takedown(struct drm_device *dev)
 		NV_INFO(dev, "Stopping card...\n");
 		nouveau_backlight_exit(dev);
 		drm_irq_uninstall(dev);
-		pscnv_graph_takedown(dev);
-		pscnv_fifo_takedown(dev);
+		if (dev_priv->card_type < NV_C0) {
+			pscnv_graph_takedown(dev);
+			pscnv_fifo_takedown(dev);
+		} else {
+		}
 		engine->fb.takedown(dev);
 		engine->timer.takedown(dev);
 		engine->mc.takedown(dev);
@@ -685,6 +704,9 @@ int nouveau_load(struct drm_device *dev, unsigned long flags)
 	case 0x90:
 	case 0xa0:
 		dev_priv->card_type = NV_50;
+		break;
+	case 0xc0:
+		dev_priv->card_type = NV_C0;
 		break;
 	default:
 		NV_INFO(dev, "Unsupported chipset 0x%08x\n", reg0);

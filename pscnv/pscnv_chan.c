@@ -57,6 +57,9 @@ pscnv_chan_new (struct pscnv_vspace *vs) {
 	 * heap. for the BAR fake channel, we'll only need two objects,
 	 * so keep it minimal
 	 */
+	if (dev_priv->card_type >= 0xC0)
+		size = 0x1000;
+	else
 	if (!res->isbar)
 		size = 0x10000;
 	else if (dev_priv->chipset == 0x50)
@@ -65,6 +68,11 @@ pscnv_chan_new (struct pscnv_vspace *vs) {
 		size = 0x5000;
 	res->vo = pscnv_vram_alloc(vs->dev, size, PSCNV_VO_CONTIG,
 			0, (res->isbar ? 0xc5a2ba7 : 0xc5a2f1f0));
+
+	if (dev_priv->card_type >= 0xC0) {
+		mutex_unlock(&vs->lock);
+		return res;
+	}
 
 	if (!vs->isbar)
 		pscnv_vspace_map3(res->vo);

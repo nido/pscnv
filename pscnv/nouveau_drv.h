@@ -343,6 +343,7 @@ struct drm_nouveau_private {
 	/* VRAM/fb configuration */
 	uint64_t vram_size;
 	uint64_t vram_sys_base;
+	uint64_t vm_ramin_base;
 
 	uint64_t fb_size;
 	uint64_t fb_phys;
@@ -353,10 +354,13 @@ struct drm_nouveau_private {
 	struct list_head vram_global_list;
 	struct list_head vram_free_list;
 	uint32_t vram_rblock_size;
+	int ropc_count;
 	struct mutex vram_mutex;
 
-	struct pscnv_vspace *barvm;
-	struct pscnv_chan *barch;
+	struct pscnv_vspace *bar1_vm;
+	struct pscnv_vspace *bar3_vm;
+	struct pscnv_chan *bar1_ch;
+	struct pscnv_chan *bar3_ch;
 
 	struct pscnv_vspace *vspaces[128];
 	struct pscnv_chan *chans[128];
@@ -858,6 +862,7 @@ extern void nv40_mc_takedown(struct drm_device *);
 
 /* nv50_mc.c */
 extern int  nv50_mc_init(struct drm_device *);
+extern int  nvc0_mc_init(struct drm_device *);
 extern void nv50_mc_takedown(struct drm_device *);
 
 /* nv04_timer.c */
@@ -1119,8 +1124,9 @@ static inline uint32_t nv_rv32(struct pscnv_vo *vo,
 	struct drm_nouveau_private *dev_priv = vo->dev->dev_private;
 	uint32_t res;
 	uint64_t addr = vo->start + offset;
-	if (vo->map3 && dev_priv->barvm)
-		return ioread32_native(dev_priv->ramin + vo->map3->start - dev_priv->fb_size + offset);
+	if (vo->map3 && dev_priv->bar3_vm)
+		return ioread32_native(dev_priv->ramin + vo->map3->start
+				       - dev_priv->vm_ramin_base + offset);
 	spin_lock(&dev_priv->pramin_lock);
 	if (addr >> 16 != dev_priv->pramin_start) {
 		dev_priv->pramin_start = addr >> 16;
@@ -1136,8 +1142,9 @@ static inline void nv_wv32(struct pscnv_vo *vo,
 {
 	struct drm_nouveau_private *dev_priv = vo->dev->dev_private;
 	uint64_t addr = vo->start + offset;
-	if (vo->map3 && dev_priv->barvm)
-		return iowrite32_native(val, dev_priv->ramin + vo->map3->start - dev_priv->fb_size + offset);
+	if (vo->map3 && dev_priv->bar3_vm)
+		return iowrite32_native(val, dev_priv->ramin + vo->map3->start
+					- dev_priv->vm_ramin_base + offset);
 	spin_lock(&dev_priv->pramin_lock);
 	if (addr >> 16 != dev_priv->pramin_start) {
 		dev_priv->pramin_start = addr >> 16;

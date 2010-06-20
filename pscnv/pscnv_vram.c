@@ -27,6 +27,7 @@
 #include "drmP.h"
 #include "drm.h"
 #include "nouveau_drv.h"
+#include "nouveau_reg.h"
 #include "pscnv_vram.h"
 #include <linux/list.h>
 #include <linux/kernel.h>
@@ -182,24 +183,34 @@ pscnv_vram_try_untype(struct drm_device *dev, struct pscnv_vram_region *reg) {
 	return 0;
 }
 
-int
-pscnv_vram_init(struct drm_device *dev)
+static int
+nvc0_vram_calc(struct drm_device *dev)
 {
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
-	struct pscnv_vram_region *allmem;
+	uint32_t ctrlr_num, ctrlr_amt;
+
+	ctrlr_num = nv_rd32(dev, NVC0_MEM_CTRLR_COUNT);
+	ctrlr_amt = nv_rd32(dev, NVC0_MEM_CTRLR_RAM_AMOUNT);
+
+	dev_priv->vram_size = ctrlr_num * (ctrlr_amt << 20);
+	dev_priv->vram_rblock_size = 0x1000;
+
+	if (!dev_priv->vram_size) {
+		NV_ERROR(dev, "No VRAM detected, aborting.\n");
+		return -ENODEV;
+	}
+
+	dev_priv->ropc_count = ctrlr_num;
+	return 0;
+}
+
+static int
+nv50_vram_calc(struct drm_device *dev)
+{
+	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	uint32_t r0, r4, rc, ru, rt;
 	int parts, i, colbits, rowbitsa, rowbitsb, banks;
 	uint64_t rowsize, predicted;
-	INIT_LIST_HEAD(&dev_priv->vram_global_list);
-	INIT_LIST_HEAD(&dev_priv->vram_free_list);
-	mutex_init(&dev_priv->vram_mutex);
-	spin_lock_init(&dev_priv->pramin_lock);
-
-	if (dev_priv->card_type != NV_50) {
-		NV_ERROR(dev, "Sorry, no memory allocator for NV%02x. Bailing.\n",
-				dev_priv->chipset);
-		return -EINVAL;
-	}
 
 	/* XXX: NVAA/NVAC don't have VRAM, only stolen system RAM. figure out
 	 * how much of all this is applicable there. */
@@ -229,7 +240,9 @@ pscnv_vram_init(struct drm_device *dev)
 		return -ENODEV;
 	}
 	if (dev_priv->vram_size != predicted) {
-		NV_WARN(dev, "Memory controller reports VRAM size of 0x%llx, inconsistent with our calculation of 0x%llx!\n", dev_priv->vram_size, predicted);
+		NV_WARN(dev, "Memory controller reports VRAM size of 0x%llx, "
+			"inconsistent with our calculation of 0x%llx!\n",
+			dev_priv->vram_size, predicted);
 	}
 	if (dev_priv->chipset == 0xaa || dev_priv->chipset == 0xac)
 		dev_priv->vram_sys_base = (uint64_t)nv_rd32(dev, 0x100e10) << 12;
@@ -239,6 +252,34 @@ pscnv_vram_init(struct drm_device *dev)
 		dev_priv->vram_rblock_size = rowsize * 3;
 	else
 		dev_priv->vram_rblock_size = rowsize;
+
+	return 0;
+}
+
+int
+pscnv_vram_init(struct drm_device *dev)
+{
+	struct drm_nouveau_private *dev_priv = dev->dev_private;
+	struct pscnv_vram_region *allmem;
+	int ret;
+
+	INIT_LIST_HEAD(&dev_priv->vram_global_list);
+	INIT_LIST_HEAD(&dev_priv->vram_free_list);
+	mutex_init(&dev_priv->vram_mutex);
+	spin_lock_init(&dev_priv->pramin_lock);
+
+	if (dev_priv->card_type >= NV_C0)
+		ret = nvc0_vram_calc(dev);
+	else
+	if (dev_priv->card_type >= NV_50)
+		ret = nv50_vram_calc(dev);
+	else {
+		NV_ERROR(dev, "Sorry, no memory allocator for NV%02x. "
+			 "Bailing.\n", dev_priv->chipset);
+		return -EINVAL;
+	}
+	if (ret)
+		return ret;
 
 	NV_INFO(dev, "VRAM: size 0x%llx, LSR period %x\n",
 			dev_priv->vram_size, dev_priv->vram_rblock_size);
@@ -307,6 +348,101 @@ restart:
 	return 0;
 }
 
+static int
+nv50_check_tile_flags(int tile_flags, int *lsr)
+{
+	switch (tile_flags) {
+	case 0:
+	case 0x10:
+	case 0x11:
+	case 0x12:
+	case 0x13:
+	case 0x20:
+	case 0x21:
+	case 0x22:
+	case 0x23:
+	case 0x24:
+	case 0x25:
+	case 0x26:
+	case 0x40:
+	case 0x41:
+	case 0x42:
+	case 0x43:
+	case 0x44:
+	case 0x45:
+	case 0x46:
+	case 0x54:
+	case 0x55:
+	case 0x56:
+	case 0x60:
+	case 0x61:
+	case 0x62:
+	case 0x63:
+	case 0x64:
+	case 0x65:
+	case 0x66:
+	case 0x68:
+	case 0x69:
+	case 0x6a:
+	case 0x6b:
+	case 0x70:
+	case 0x74:
+	case 0x78:
+	case 0x79:
+	case 0x7c:
+	case 0x7d:
+		*lsr = 0;
+		break;
+	case 0x18:
+	case 0x19:
+	case 0x1a:
+	case 0x1b:
+	case 0x28:
+	case 0x29:
+	case 0x2a:
+	case 0x2b:
+	case 0x2c:
+	case 0x2d:
+	case 0x2e:
+	case 0x47:
+	case 0x48:
+	case 0x49:
+	case 0x4a:
+	case 0x4b:
+	case 0x4c:
+	case 0x4d:
+	case 0x6c:
+	case 0x6d:
+	case 0x6e:
+	case 0x6f:
+	case 0x72:
+	case 0x76:
+	case 0x7a:
+	case 0x7b:
+		*lsr = 1;
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static inline int
+nvc0_check_tile_flags(int tile_flags, int *lsr)
+{
+	*lsr = 0;
+
+	switch (tile_flags) {
+	case 0x000:
+	case 0xdb0:
+	case 0xfe0:
+		return 0;
+	default:
+		break;
+	}
+	return -EINVAL;
+}
+
 struct pscnv_vo *
 pscnv_vram_alloc(struct drm_device *dev,
 		uint64_t size, int flags, int tile_flags, uint32_t cookie)
@@ -316,77 +452,12 @@ pscnv_vram_alloc(struct drm_device *dev,
 	int lsr;
 	struct pscnv_vo *res;
 	struct pscnv_vram_region *cur, *next;
-	switch (tile_flags) {
-		case 0:
-		case 0x10:
-		case 0x11:
-		case 0x12:
-		case 0x13:
-		case 0x20:
-		case 0x21:
-		case 0x22:
-		case 0x23:
-		case 0x24:
-		case 0x25:
-		case 0x26:
-		case 0x40:
-		case 0x41:
-		case 0x42:
-		case 0x43:
-		case 0x44:
-		case 0x45:
-		case 0x46:
-		case 0x54:
-		case 0x55:
-		case 0x56:
-		case 0x60:
-		case 0x61:
-		case 0x62:
-		case 0x63:
-		case 0x64:
-		case 0x65:
-		case 0x66:
-		case 0x68:
-		case 0x69:
-		case 0x6a:
-		case 0x6b:
-		case 0x70:
-		case 0x74:
-		case 0x78:
-		case 0x79:
-		case 0x7c:
-		case 0x7d:
-			lsr = 0;
-			break;
-		case 0x18:
-		case 0x19:
-		case 0x1a:
-		case 0x1b:
-		case 0x28:
-		case 0x29:
-		case 0x2a:
-		case 0x2b:
-		case 0x2c:
-		case 0x2d:
-		case 0x2e:
-		case 0x47:
-		case 0x48:
-		case 0x49:
-		case 0x4a:
-		case 0x4b:
-		case 0x4c:
-		case 0x4d:
-		case 0x6c:
-		case 0x6d:
-		case 0x6e:
-		case 0x6f:
-		case 0x72:
-		case 0x76:
-		case 0x7a:
-		case 0x7b:
-			lsr = 1;
-			break;
-		default:
+
+	if (dev_priv->card_type < NV_C0) {
+		if (nv50_check_tile_flags(tile_flags, &lsr))
+			return 0;
+	} else {
+		if (nvc0_check_tile_flags(tile_flags, &lsr))
 			return 0;
 	}
 
@@ -552,9 +623,9 @@ pscnv_vram_free(struct pscnv_vo *vo)
 	if (pscnv_vram_debug >= 1)
 		NV_INFO(vo->dev, "Freeing %d, %#llx-byte %sVO of type %08x, tile_flags %x\n", vo->serial, vo->size,
 				(vo->flags & PSCNV_VO_CONTIG ? "contig " : ""), vo->cookie, vo->tile_flags);
-	if (dev_priv->barvm && vo->map1)
+	if (dev_priv->bar1_vm && vo->map1)
 		pscnv_vspace_unmap_node(vo->map1);
-	if (dev_priv->barvm && vo->map3)
+	if (dev_priv->bar3_vm && vo->map3)
 		pscnv_vspace_unmap_node(vo->map3);
 	list_for_each_safe(pos, next, &vo->regions) {
 		struct pscnv_vram_region *reg = list_entry(pos, struct pscnv_vram_region, local_list);

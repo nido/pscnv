@@ -18,6 +18,8 @@ nv50_fb_init(struct drm_device *dev)
 	case 0xa8:
 		nv_wr32(dev, 0x100c90, 0x0d0fff);
 		break;
+	case 0xc0:
+		break;
 	default:
 		nv_wr32(dev, 0x100c90, 0x1d07ff);
 		break;

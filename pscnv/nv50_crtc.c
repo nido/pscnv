@@ -116,16 +116,23 @@ nv50_crtc_blank(struct nouveau_crtc *nv_crtc, bool blanked)
 		OUT_RING(evo, nv_crtc->fb.offset >> 8);
 		OUT_RING(evo, 0);
 		BEGIN_RING(evo, 0, NV50_EVO_CRTC(index, FB_DMA), 1);
-		if (dev_priv->chipset != 0x50)
+		if (dev_priv->chipset != 0x50) {
+			if (nv_crtc->fb.tile_flags == 0xfe) {
+				OUT_RING(evo, NvEvoVM);
+				NV_INFO(dev, "unblank: NvEvoVM\n");
+			} else
 			if (nv_crtc->fb.tile_flags == 0x7a)
 				OUT_RING(evo, NvEvoFB32);
 			else
 			if (nv_crtc->fb.tile_flags == 0x70)
 				OUT_RING(evo, NvEvoFB16);
-			else
+			else {
 				OUT_RING(evo, NvEvoVRAM);
-		else
+				NV_INFO(dev, "unblank: NvEvoVRAM\n");
+			}
+		} else {
 			OUT_RING(evo, NvEvoVRAM);
+		}
 	}
 
 	nv_crtc->fb.blanked = blanked;
@@ -555,11 +562,14 @@ nv50_crtc_do_mode_set_base(struct drm_crtc *crtc, int x, int y,
 	nv_crtc->fb.tile_flags = fb->vo->tile_flags;
 	nv_crtc->fb.cpp = drm_fb->bits_per_pixel / 8;
 	if (!nv_crtc->fb.blanked && dev_priv->chipset != 0x50) {
-		ret = RING_SPACE(evo, 2);
+		ret = RING_SPACE(evo, 3);
 		if (ret)
 			return ret;
 
-		BEGIN_RING(evo, 0, NV50_EVO_CRTC(nv_crtc->index, FB_DMA), 1);
+		BEGIN_RING(evo, 0, NV50_EVO_CRTC(nv_crtc->index, FB_DMA), 2);
+		if (nv_crtc->fb.tile_flags == 0xfe)
+			OUT_RING(evo, NvEvoVM);
+		else
 		if (nv_crtc->fb.tile_flags == 0x7a)
 			OUT_RING(evo, NvEvoFB32);
 		else
@@ -567,9 +577,10 @@ nv50_crtc_do_mode_set_base(struct drm_crtc *crtc, int x, int y,
 			OUT_RING(evo, NvEvoFB16);
 		else
 			OUT_RING(evo, NvEvoVRAM);
+		OUT_RING  (evo, 0);
 	}
 
-	ret = RING_SPACE(evo, 12);
+	ret = RING_SPACE(evo, 15);
 	if (ret)
 		return ret;
 
@@ -580,13 +591,16 @@ nv50_crtc_do_mode_set_base(struct drm_crtc *crtc, int x, int y,
 	if (!nv_crtc->fb.tile_flags) {
 		OUT_RING(evo, drm_fb->pitch | (1 << 20));
 	} else {
-		OUT_RING(evo, ((drm_fb->pitch / 4) << 4) |
-				  fb->vo->user[0]);
+		OUT_RING(evo, ((drm_fb->pitch / 4) << 4) | fb->vo->user[0]);
 	}
 	if (dev_priv->chipset == 0x50)
 		OUT_RING(evo, (fb->vo->tile_flags << 16) | format);
 	else
 		OUT_RING(evo, format);
+
+	BEGIN_RING(evo, 0, 0x910, 2);
+	OUT_RING  (evo, 0);
+	OUT_RING  (evo, 0);
 
 	BEGIN_RING(evo, 0, NV50_EVO_CRTC(nv_crtc->index, CLUT_MODE), 1);
 	OUT_RING(evo, fb->base.depth == 8 ?

@@ -52,24 +52,34 @@ nv50_evo_dmaobj_new(struct nouveau_channel *evo, uint32_t class, uint32_t name,
 		    uint32_t tile_flags, uint32_t magic_flags,
 		    uint32_t offset, uint32_t limit)
 {
-	int ret;
-
+	struct drm_nouveau_private *dev_priv = evo->dev->dev_private;
+	int ret, eng;
 	uint32_t inst = evo->evo_inst;
-	if (inst+0x20 > evo->evo_obj->size)
+
+	if (inst + 0x20 > evo->evo_obj->size)
 		return -ENOMEM;
 	evo->evo_inst += 0x20;
 
-	if ((ret = pscnv_ramht_insert(&evo->evo_ramht, name, inst << 10 | 2))) {
+	eng = (dev_priv->card_type >= NV_C0) ? 0xe1 : 0x2;
+
+	if ((ret = pscnv_ramht_insert(&evo->evo_ramht, name,
+				      (inst << 10) | eng))) {
 		return ret;
 		evo->evo_inst -= 0x20;
 	}
 
-	nv_wv32(evo->evo_obj, inst + 0x00, (tile_flags << 22) | (magic_flags << 16) | class);
+	nv_wv32(evo->evo_obj, inst + 0x00,
+		(tile_flags << 22) | (magic_flags << 16) | class);
 	nv_wv32(evo->evo_obj, inst + 0x04, limit);
 	nv_wv32(evo->evo_obj, inst + 0x08, offset);
 	nv_wv32(evo->evo_obj, inst + 0x0c, 0x00000000);
-	nv_wv32(evo->evo_obj, inst + 0x10, 0x00000000);
-	nv_wv32(evo->evo_obj, inst + 0x14, 0x00010000);
+	if (dev_priv->card_type >= NV_C0) {
+		nv_wv32(evo->evo_obj, inst + 0x10, 0x00000010);
+		nv_wv32(evo->evo_obj, inst + 0x14, tile_flags ? 0 : 0x20000);
+	} else {
+		nv_wv32(evo->evo_obj, inst + 0x10, 0x00000000);
+		nv_wv32(evo->evo_obj, inst + 0x14, 0x00010000);
+	}
 
 	return 0;
 }
@@ -81,6 +91,8 @@ nv50_evo_channel_new(struct drm_device *dev, struct nouveau_channel **pchan)
 	struct nouveau_channel *chan;
 	int ret;
 	int i;
+
+	NV_DEBUG(dev, "Creating EVO channel.\n");
 
 	chan = kzalloc(sizeof(struct nouveau_channel), GFP_KERNEL);
 	if (!chan)
@@ -106,10 +118,18 @@ nv50_evo_channel_new(struct drm_device *dev, struct nouveau_channel **pchan)
 	chan->evo_ramht.offset = 0;
 	chan->evo_inst = 0x1000;
 	pscnv_vspace_map3(chan->evo_obj);
-	for (i = 0; i < 0x1000; i += 4)
+	for (i = 0; i < 0x2000; i += 4)
 		nv_wv32(chan->evo_obj, i, 0);
 
-	if (dev_priv->chipset != 0x50) {
+	if (dev_priv->chipset >= 0xc0) {
+		ret = nv50_evo_dmaobj_new(chan, 0x3d, NvEvoVM, 0xfe, 0x19,
+					  0, 0xffffffff);
+		if (ret) {
+			nv50_evo_channel_del(pchan);
+			return ret;
+		}
+	} else
+	if (dev_priv->chipset > 0x50) {
 		ret = nv50_evo_dmaobj_new(chan, 0x3d, NvEvoFB16, 0x70, 0x19,
 					  0, 0xffffffff);
 		if (ret) {
@@ -133,7 +153,8 @@ nv50_evo_channel_new(struct drm_device *dev, struct nouveau_channel **pchan)
 		return ret;
 	}
 
-	chan->pushbuf = pscnv_vram_alloc(dev, 0x1000, PSCNV_VO_CONTIG, 0, 0xd15f1f0);
+	chan->pushbuf = pscnv_vram_alloc(dev, 0x1000,
+					 PSCNV_VO_CONTIG, 0, 0xd15f1f0);
 	if (!chan->pushbuf) {
 		NV_ERROR(dev, "Error creating EVO DMA push buffer: %d\n", ret);
 		nv50_evo_channel_del(pchan);
@@ -159,6 +180,16 @@ nv50_display_init(struct drm_device *dev)
 	NV_DEBUG_KMS(dev, "\n");
 
 	nv_wr32(dev, 0x00610184, nv_rd32(dev, 0x00614004));
+
+	if (dev_priv->card_type >= NV_C0) {
+		nv_wr32(dev, 0x6101d4, nv_rd32(dev, 0x61a800));
+		nv_wr32(dev, 0x6101d8, nv_rd32(dev, 0x61b000));
+
+		for (i = 0; i < 7; ++i) {
+			val = nv_rd32(dev, 0x61c000 + i * 0x800);
+			nv_wr32(dev, 0x6101e0 + i * 4, val);
+		}
+	}
 	/*
 	 * I think the 0x006101XX range is some kind of main control area
 	 * that enables things.
@@ -203,9 +234,12 @@ nv50_display_init(struct drm_device *dev)
 	NV_DEBUG_KMS(dev, "ram_amount %d\n", ram_amount);
 	if (ram_amount > 256*1024*1024)
 		ram_amount = 256*1024*1024;
-	nv_wr32(dev, NV50_PDISPLAY_RAM_AMOUNT, ram_amount - 1);
-	nv_wr32(dev, NV50_PDISPLAY_UNK_388, 0x150000);
-	nv_wr32(dev, NV50_PDISPLAY_UNK_38C, 0);
+
+	if (dev_priv->card_type < NV_C0) {
+		nv_wr32(dev, NV50_PDISPLAY_RAM_AMOUNT, ram_amount - 1);
+		nv_wr32(dev, NV50_PDISPLAY_UNK_388, 0x150000);
+		nv_wr32(dev, NV50_PDISPLAY_UNK_38C, 0);
+	}
 
 	/* The precise purpose is unknown, i suspect it has something to do
 	 * with text mode.
@@ -216,7 +250,7 @@ nv50_display_init(struct drm_device *dev)
 		if (!nv_wait(0x006194e8, 2, 0)) {
 			NV_ERROR(dev, "timeout: (0x6194e8 & 2) != 0\n");
 			NV_ERROR(dev, "0x6194e8 = 0x%08x\n",
-						nv_rd32(dev, 0x6194e8));
+				 nv_rd32(dev, 0x6194e8));
 			return -EBUSY;
 		}
 	}
@@ -229,11 +263,11 @@ nv50_display_init(struct drm_device *dev)
 	while ((val = nv_rd32(dev, NV50_PDISPLAY_CHANNEL_STAT(0))) & 0x1e0000) {
 		if ((val & 0x9f0000) == 0x20000)
 			nv_wr32(dev, NV50_PDISPLAY_CHANNEL_STAT(0),
-							val | 0x800000);
+				val | 0x800000);
 
 		if ((val & 0x3f0000) == 0x30000)
 			nv_wr32(dev, NV50_PDISPLAY_CHANNEL_STAT(0),
-							val | 0x200000);
+				val | 0x200000);
 
 		if (ptimer->read(dev) - start > 1000000000ULL) {
 			NV_ERROR(dev, "timeout: (0x610200 & 0x1e0000) != 0\n");
@@ -282,7 +316,8 @@ nv50_display_init(struct drm_device *dev)
 		NV50_PDISPLAY_CHANNEL_DMA_CB_LOCATION_VRAM |
 		NV50_PDISPLAY_CHANNEL_DMA_CB_VALID);
 	nv_wr32(dev, NV50_PDISPLAY_CHANNEL_UNK2(0), 0x00010000);
-	nv_wr32(dev, NV50_PDISPLAY_CHANNEL_UNK3(0), 0x00000002);
+	nv_wr32(dev, NV50_PDISPLAY_CHANNEL_UNK3(0),
+		(dev_priv->card_type >= NV_C0) ? 0xe1 : 0x00000002);
 	if (!nv_wait(0x610200, 0x80000000, 0x00000000)) {
 		NV_ERROR(dev, "timeout: (0x610200 & 0x80000000) == 0\n");
 		NV_ERROR(dev, "0x610200 = 0x%08x\n", nv_rd32(dev, 0x610200));
@@ -435,6 +470,9 @@ int nv50_display_create(struct drm_device *dev)
 	int ret, i;
 
 	NV_DEBUG_KMS(dev, "\n");
+
+	mdelay(5);
+	NV_INFO(dev, "nv50_display_create\n");
 
 	/* init basic kernel modesetting */
 	drm_mode_config_init(dev);

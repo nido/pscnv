@@ -6233,7 +6233,8 @@ nouveau_bios_init(struct drm_device *dev)
 
 	/* these will need remembering across a suspend */
 	saved_nv_pextdev_boot_0 = bios_rd32(bios, NV_PEXTDEV_BOOT_0);
-	bios->state.saved_nv_pfb_cfg0 = bios_rd32(bios, NV_PFB_CFG0);
+	if (dev_priv->card_type < NV_C0) /* getting PBUS error */
+		bios->state.saved_nv_pfb_cfg0 = bios_rd32(bios, NV_PFB_CFG0);
 
 	/* init script execution disabled */
 	bios->execute = false;
