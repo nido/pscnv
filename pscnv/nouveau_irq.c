@@ -1259,7 +1259,10 @@ nouveau_irq_handler(DRM_IRQ_ARGS)
 #endif
 
 	if (status & NV_PMC_INTR_0_PFIFO_PENDING) {
-		pscnv_fifo_irq_handler(dev);
+		if (dev_priv->card_type < NV_C0)
+			pscnv_fifo_irq_handler(dev);
+		else
+			nvc0_pfifo_irq_handler(dev);
 		status &= ~NV_PMC_INTR_0_PFIFO_PENDING;
 	}
 

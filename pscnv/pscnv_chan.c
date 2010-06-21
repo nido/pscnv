@@ -69,13 +69,13 @@ pscnv_chan_new (struct pscnv_vspace *vs) {
 	res->vo = pscnv_vram_alloc(vs->dev, size, PSCNV_VO_CONTIG,
 			0, (res->isbar ? 0xc5a2ba7 : 0xc5a2f1f0));
 
+	if (!vs->isbar)
+		pscnv_vspace_map3(res->vo);
+
 	if (dev_priv->card_type >= 0xC0) {
 		mutex_unlock(&vs->lock);
 		return res;
 	}
-
-	if (!vs->isbar)
-		pscnv_vspace_map3(res->vo);
 
 	if (dev_priv->chipset == 0x50)
 		chan_pd = NV50_CHAN_PD;
@@ -234,6 +234,9 @@ int pscnv_ioctl_chan_new(struct drm_device *dev, void *data,
 	req->cid = cid;
 	req->map_handle = 0xc0000000 | cid << 16;
 
+	if (dev_priv->chipset >= 0xc0) {
+		/* deferred */
+	} else
 	if (dev_priv->chipset != 0x50) {
 		nv_wr32(dev, 0x2600 + cid * 4, (ch->vo->start + ch->ramfc) >> 8);
 	} else {
@@ -342,6 +345,7 @@ int pscnv_chan_mmap(struct file *filp, struct vm_area_struct *vma)
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	int cid;
 	struct pscnv_chan *ch;
+	uint64_t phys;
 
 	if ((vma->vm_pgoff * PAGE_SIZE & ~0x7f0000ull) == 0xc0000000) {
 		if (vma->vm_end - vma->vm_start > 0x2000)
@@ -356,11 +360,16 @@ int pscnv_chan_mmap(struct file *filp, struct vm_area_struct *vma)
 		kref_get(&ch->ref);
 		mutex_unlock (&dev_priv->vm_mutex);
 
+		if (dev_priv->card_type >= NV_C0) {
+			phys = drm_get_resource_start(dev, 1);
+			phys += dev_priv->fifo_vo->map1->start + cid * 0x1000;
+		} else
+			phys = dev_priv->mmio_phys + 0xc00000 + cid * 0x2000;
+
 		vma->vm_flags |= VM_RESERVED | VM_IO | VM_PFNMAP | VM_DONTEXPAND;
 		vma->vm_ops = &pscnv_chan_vm_ops;
 		vma->vm_private_data = ch;
-		return remap_pfn_range(vma, vma->vm_start, 
-			(dev_priv->mmio_phys + 0xc00000 + cid * 0x2000) >> PAGE_SHIFT,
+		return remap_pfn_range(vma, vma->vm_start, phys >> PAGE_SHIFT,
 			vma->vm_end - vma->vm_start, PAGE_SHARED);
 	}
 	return -EINVAL;

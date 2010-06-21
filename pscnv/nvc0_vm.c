@@ -78,7 +78,7 @@ nvc0_vspace_ptab(struct pscnv_vspace *vs, unsigned int pde)
 		if (pt->pde == pde)
 			return pt;
 
-	NV_DEBUG(vs->dev, "creating new page table\n");
+	NV_DEBUG(vs->dev, "creating new page table: %i[%u]\n", vs->vid, pde);
 
 	pt = kzalloc(sizeof(struct pscnv_ptab), GFP_KERNEL);
 	if (!pt)
@@ -171,6 +171,11 @@ nvc0_vspace_do_map(struct pscnv_vspace *vs,
 		   struct pscnv_vo *vo, uint64_t offset)
 {
 	struct pscnv_vram_region *reg;
+	int pfl;
+
+	pfl = 1;
+	if (!vs->isbar && (vo->flags & PSCNV_VO_NOUSER))
+		pfl |= 2;
 
 	NV_DEBUG(vs->dev, "nvc0_vspace_do_map(%p, 0x%010llx)\n", vs, offset);
 
@@ -185,6 +190,10 @@ nvc0_vspace_do_map(struct pscnv_vspace *vs,
 	        psh = s ? NVC0_SPAGE_SHIFT : NVC0_LPAGE_SHIFT;
 		psz = 1 << psh;
 
+		NV_DEBUG(vs->dev,
+			 "VS %i 0x%010llx <-> (0x%08llx, %llx) (%x, %u)\n",
+			 vs->vid, offset, phys, reg->size, vo->tile_flags, psh);
+
 		for (phys = reg->start; phys < phys_end; phys += psz) {
 			struct pscnv_ptab *pt;
 			int pte = (offset & NVC0_VM_BLOCK_MASK) >> psh;
@@ -192,11 +201,7 @@ nvc0_vspace_do_map(struct pscnv_vspace *vs,
 
 			pt = nvc0_vspace_ptab(vs, pde);
 
-			NV_DEBUG(vs->dev,
-				"VM: 0x%010llx <- 0x%08llx (%x, %i)\n",
-				offset, phys, vo->tile_flags, psh);
-
-			nv_wv32(pt->vo[s], pte * 8 + 0, (phys >> 8) | 1);
+			nv_wv32(pt->vo[s], pte * 8 + 0, (phys >> 8) | pfl);
 			nv_wv32(pt->vo[s], pte * 8 + 4, vo->tile_flags);
 
 			offset += psz;

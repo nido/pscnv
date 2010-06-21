@@ -48,6 +48,7 @@ struct pscnv_chan {
 	struct drm_file *filp;
 	int engines;
 	struct pscnv_vo *grctx;
+	struct pscnv_vm_mapnode *grctx_vm;
 	struct kref ref;
 };
 
@@ -59,6 +60,8 @@ extern int pscnv_chan_dmaobj_new(struct pscnv_chan *, uint32_t type, uint64_t st
 extern void pscnv_chan_cleanup(struct drm_device *dev, struct drm_file *file_priv);
 extern int pscnv_chan_mmap(struct file *filp, struct vm_area_struct *vma);
 struct pscnv_chan *pscnv_get_chan(struct drm_device *dev, struct drm_file *file_priv, int cid);
+
+extern int nvc0_chan_init_grctx(struct drm_device *dev, struct pscnv_chan *chan);
 
 int pscnv_ioctl_chan_new(struct drm_device *dev, void *data,
 						struct drm_file *file_priv);

@@ -11,7 +11,7 @@ pscnv-objs := nouveau_drv.o nouveau_ioc32.o nouveau_acpi.o nouveau_state.o \
 	     nv50_sor.o \
 	     pscnv_vram.o pscnv_vm.o pscnv_gem.o pscnv_ramht.o pscnv_chan.o \
 	     pscnv_fifo.o pscnv_graph.o \
-	     nvc0_vm.o
+	     nvc0_vm.o nvc0_grctx.o nvc0_graph.o nvc0_fifo.o
 
 obj-m := pscnv.o
 

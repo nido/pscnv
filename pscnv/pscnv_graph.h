@@ -34,4 +34,8 @@ int pscnv_ioctl_obj_gr_new(struct drm_device *dev, void *data,
 						struct drm_file *file_priv);
 void pscnv_graph_irq_handler(struct drm_device *dev);
 
+extern int nvc0_graph_init(struct drm_device *);
+extern void nvc0_graph_takedown(struct drm_device *);
+void nvc0_grctx_construct(struct drm_device *dev, struct pscnv_chan *chan);
+
 #endif

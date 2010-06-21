@@ -55,6 +55,7 @@ struct pscnv_vo {
 
 /* the VO flags */
 #define PSCNV_VO_CONTIG		0x00000001	/* VO needs to be contiguous in VRAM */
+#define PSCNV_VO_NOUSER		0x00000002	/* only privileged access (e.g. ctxprog) */
 
 /* a contiguous VRAM region. They're linked into two lists: global list of
  * all regions and local list of regions within a single VO or free list.

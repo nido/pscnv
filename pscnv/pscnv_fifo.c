@@ -111,6 +111,10 @@ void pscnv_fifo_playlist_update (struct drm_device *dev) {
 void pscnv_fifo_chan_free(struct pscnv_chan *ch) {
 	struct drm_device *dev = ch->vspace->dev;
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
+
+	if (dev_priv->card_type >= NV_C0)
+		return nvc0_fifo_chan_free(ch);
+
 	spin_lock(&dev_priv->pfifo_lock);
 	nv_wr32(dev, 0x2600 + ch->cid * 4, nv_rd32(dev, 0x2600 + ch->cid * 4) & 0x3fffffff);
 	pscnv_fifo_playlist_update(dev);
@@ -158,6 +162,12 @@ int pscnv_ioctl_fifo_init(struct drm_device *dev, void *data,
 	if (!ch) {
 		mutex_unlock (&dev_priv->vm_mutex);
 		return -ENOENT;
+	}
+
+	if (dev_priv->card_type >= NV_C0) {
+		int ret = nvc0_fifo_create(dev, ch, req);
+		mutex_unlock (&dev_priv->vm_mutex);
+		return ret;
 	}
 
 	/* XXX: verify that we get a DMA object. */

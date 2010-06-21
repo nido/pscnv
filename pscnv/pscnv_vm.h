@@ -70,6 +70,13 @@ struct pscnv_vspace {
 	struct drm_file *filp;
 	int engines;
 	struct kref ref;
+
+	/* for PGRAPH, don't know what they do */
+	struct pscnv_vm_mapnode *obj08004;
+	struct pscnv_vm_mapnode *obj0800c;
+	struct pscnv_vm_mapnode *obj19848;
+	struct pscnv_vo *ctxsw_vo;
+	struct pscnv_vm_mapnode *ctxsw_vm;
 };
 
 struct pscnv_vm_mapnode {

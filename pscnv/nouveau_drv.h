@@ -373,9 +373,17 @@ struct drm_nouveau_private {
 	spinlock_t pfifo_lock;
 	spinlock_t pgraph_lock;
 
+	volatile uint32_t *fifo_ctl;
+	struct pscnv_vo *fifo_vo;
+
 	/* PGRAPH */
 
+	const uint32_t *grctx_vals;
 	uint32_t grctx_size;
+
+	struct pscnv_vo *obj188b4, *obj188b8;
+	struct pscnv_vo *obj08004, *obj0800c;
+	struct pscnv_vo *obj19848;
 
 	/* for slow-path nv_wv32/nv_rv32 */
 

@@ -457,8 +457,8 @@ int pscnv_vspace_map1(struct pscnv_vo *vo) {
 	if (!dev_priv->bar1_vm)
 		return -ENODEV;
 
-	NV_DEBUG(vo->dev, "mapping into FB BAR: 0x%08llx, 0x%llx\n",
-		 vo->start, vo->size);
+	NV_DEBUG(vo->dev, "mapping 0x%08x into FB BAR: 0x%08llx, 0x%llx\n",
+		 vo->cookie, vo->start, vo->size);
 
 	start = 0;
 	end = dev_priv->fb_size;
@@ -484,8 +484,8 @@ int pscnv_vspace_map3(struct pscnv_vo *vo) {
 		end = start + dev_priv->ramin_size;
 	}
 
-	NV_DEBUG(vo->dev, "mapping into RAMIN: 0x%08llx, 0x%llx\n",
-		 vo->start, vo->size);
+	NV_DEBUG(vo->dev, "mapping 0x%08x into RAMIN: 0x%08llx, 0x%llx\n",
+		 vo->cookie, vo->start, vo->size);
 
 	return pscnv_vspace_map(dev_priv->bar3_vm,
 				vo, start, end, 0, &vo->map3);

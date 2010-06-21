@@ -473,7 +473,7 @@ nouveau_card_init(struct drm_device *dev)
 	if (dev_priv->card_type < NV_C0)
 		ret = pscnv_fifo_init(dev);
 	else {
-		/* TODO */
+		ret = nvc0_fifo_init(dev);
 	}
 	if (ret)
 		goto out_fb;
@@ -482,7 +482,7 @@ nouveau_card_init(struct drm_device *dev)
 	if (dev_priv->card_type < NV_C0)
 		ret = pscnv_graph_init(dev);
 	else {
-		/* TODO */
+		ret = nvc0_graph_init(dev);
 	}
 	if (ret)
 		goto out_fifo;
@@ -572,6 +572,8 @@ static void nouveau_card_takedown(struct drm_device *dev)
 			pscnv_graph_takedown(dev);
 			pscnv_fifo_takedown(dev);
 		} else {
+			nvc0_graph_takedown(dev);
+			nvc0_fifo_takedown(dev);
 		}
 		engine->fb.takedown(dev);
 		engine->timer.takedown(dev);
