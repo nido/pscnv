@@ -286,6 +286,8 @@ nvc0_vm_init(struct drm_device *dev)
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	int ret;
 
+	mutex_init(&dev_priv->vm_mutex);
+
 	dev_priv->vm_ramin_base = 0;
 
 	ret = nvc0_vm_init_bar3(dev);
