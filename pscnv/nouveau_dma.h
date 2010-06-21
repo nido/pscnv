@@ -78,7 +78,7 @@ enum {
 	NvEvoVRAM	= 0x01000000,
 	NvEvoFB16	= 0x01000001,
 	NvEvoFB32	= 0x01000002,
-	NvEvoVM         = 0x01000003
+	NvEvoFE         = 0x01000003
 };
 
 #if 0

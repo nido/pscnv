@@ -122,7 +122,7 @@ nv50_evo_channel_new(struct drm_device *dev, struct nouveau_channel **pchan)
 		nv_wv32(chan->evo_obj, i, 0);
 
 	if (dev_priv->chipset >= 0xc0) {
-		ret = nv50_evo_dmaobj_new(chan, 0x3d, NvEvoVM, 0xfe, 0x19,
+		ret = nv50_evo_dmaobj_new(chan, 0x3d, NvEvoFE, 0xfe, 0x19,
 					  0, 0xffffffff);
 		if (ret) {
 			nv50_evo_channel_del(pchan);

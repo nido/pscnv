@@ -433,9 +433,9 @@ nvc0_check_tile_flags(int tile_flags, int *lsr)
 	*lsr = 0;
 
 	switch (tile_flags) {
-	case 0x000:
-	case 0xdb0:
-	case 0xfe0:
+	case 0x00:
+	case 0xdb:
+	case 0xfe:
 		return 0;
 	default:
 		break;
