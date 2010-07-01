@@ -279,7 +279,7 @@ nvc0_vm_init_bar1(struct drm_device *dev)
 	nvc0_bar3_flush(dev);
 
 	nv_wr32(dev, 0x1140, 0x8c0001fe);
-	nv_wr32(dev, 0x88484, nv_rd32(dev, 88484) | 0x10);
+	nv_wr32(dev, 0x88484, nv_rd32(dev, 0x88484) | 0x10);
 	nv_wr32(dev, 0x1c00, 0x42);
 
 	return 0;
