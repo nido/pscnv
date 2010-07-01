@@ -1207,7 +1207,7 @@ nouveau_crtc_irq_handler(struct drm_device *dev, int crtc)
 static void
 nouveau_pbus_irq_handler(struct drm_device *dev) {
 	uint32_t status = nv_rd32(dev, 0x1100);
-	if (status & 8) {
+	if (status & 0xc) {
 		uint32_t addr = nv_rd32(dev, 0x9084);
 		uint32_t data = nv_rd32(dev, 0x9088);
 		if (!(addr&1)) {
@@ -1217,8 +1217,9 @@ nouveau_pbus_irq_handler(struct drm_device *dev) {
 		} else {
 			NV_ERROR(dev, "PBUS: MMIO read fault, addr %06x\n", addr & ~3);
 		}
-		nv_wr32(dev, 0x1100, 8);
-		status &= ~8;
+		nv_wr32(dev, 0x9084, 0);
+		nv_wr32(dev, 0x1100, 0xc);
+		status &= ~0xc;
 	}
 
 	if (status) {
