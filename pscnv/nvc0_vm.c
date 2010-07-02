@@ -43,7 +43,7 @@ nvc0_tlb_flush(struct pscnv_vspace *vs)
 	val = nv_rd32(dev, 0x100c80);
 
 	nv_wr32(dev, 0x100cb8, vs->pd->start >> 8);
-	nv_wr32(dev, 0x100cbc, 0x80000000 | (vs->isbar ? 0x5 : 0x1));
+	nv_wr32(dev, 0x100cbc, 0x80000000 | ((vs->isbar == 3) ? 0x5 : 0x1));
 
 	if (!nv_wait(0x100c80, ~0, val)) {
 		NV_ERROR(vs->dev, "tlb flush timed out\n");
@@ -64,15 +64,52 @@ nvc0_bar3_flush(struct drm_device *dev)
 }
 
 static int
-nvc0_vspace_fill_pde(struct pscnv_vspace *vs, unsigned int pde);
-
-static struct pscnv_ptab *
-nvc0_vspace_ptab(struct pscnv_vspace *vs, unsigned int pde)
+nvc0_vspace_fill_pde(struct pscnv_vspace *vs, struct pscnv_pgt *pgt)
 {
-	struct pscnv_ptab *pt;
+	const uint32_t size = NVC0_VM_SPTE_COUNT << (3 - pgt->limit);
+	int i;
+	uint32_t pde[2];
+
+	pgt->vo[1] = pscnv_vram_alloc(vs->dev, size, PSCNV_VO_CONTIG, 0, 0x59);
+	if (!pgt->vo[1])
+		return -ENOMEM;
+
+	for (i = 0; i < size; i += 4)
+		nv_wv32(pgt->vo[1], i, 0);
+
+	pde[0] = pgt->limit << 2;
+	pde[1] = (pgt->vo[1]->start >> 8) | 1;
+
+	if (vs->isbar != 3) {
+		pgt->vo[0] = pscnv_vram_alloc(vs->dev, NVC0_VM_LPTE_COUNT * 8,
+					      PSCNV_VO_CONTIG, 0, 0x79);
+		if (!pgt->vo[0])
+			return -ENOMEM;
+
+		pscnv_vspace_map3(pgt->vo[0]);
+		pscnv_vspace_map3(pgt->vo[1]);
+
+		for (i = 0; i < NVC0_VM_LPTE_COUNT * 8; i += 4)
+			nv_wv32(pgt->vo[0], i, 0);
+
+		pde[0] |= (pgt->vo[0]->start >> 8) | 1;
+	}
+	nvc0_bar3_flush(vs->dev);
+
+	nv_wv32(vs->pd, pgt->pde * 8 + 0, pde[0]);
+	nv_wv32(vs->pd, pgt->pde * 8 + 4, pde[1]);
+
+	nvc0_bar3_flush(vs->dev);
+	return nvc0_tlb_flush(vs);
+}
+
+static struct pscnv_pgt *
+nvc0_vspace_pgt(struct pscnv_vspace *vs, unsigned int pde)
+{
+	struct pscnv_pgt *pt;
 	struct list_head *pts = &vs->ptht[NVC0_PDE_HASH(pde)];
 
-	BUG_ON(pde >= ((1ULL << 40) / (128ULL << 20)));
+	BUG_ON(pde >= NVC0_VM_PDE_COUNT);
 
 	list_for_each_entry(pt, pts, head)
 		if (pt->pde == pde)
@@ -80,85 +117,58 @@ nvc0_vspace_ptab(struct pscnv_vspace *vs, unsigned int pde)
 
 	NV_DEBUG(vs->dev, "creating new page table: %i[%u]\n", vs->vid, pde);
 
-	pt = kzalloc(sizeof(struct pscnv_ptab), GFP_KERNEL);
+	pt = kzalloc(sizeof(struct pscnv_pgt), GFP_KERNEL);
 	if (!pt)
 		return NULL;
 	pt->pde = pde;
-	list_add_tail(&pt->head, pts);
+	pt->limit = 0;
 
-	if (nvc0_vspace_fill_pde(vs, pde))
+	if (nvc0_vspace_fill_pde(vs, pt)) {
+		kfree(pt);
 		return NULL;
+	}
+
+	list_add_tail(&pt->head, pts);
 	return pt;
 }
 
-static int
-nvc0_vspace_fill_pde(struct pscnv_vspace *vs, unsigned int pde)
+void
+nvc0_pgt_del(struct pscnv_vspace *vs, struct pscnv_pgt *pgt)
 {
-	struct pscnv_ptab *pt = nvc0_vspace_ptab(vs, pde);
-	int i;
+	pscnv_vram_free(pgt->vo[1]);
+	if (pgt->vo[0])
+		pscnv_vram_free(pgt->vo[0]);
+	list_del(&pgt->head);
 
-	if (!pt)
-		return -ENOMEM;
+	nv_wv32(vs->pd, pgt->pde * 8 + 0, 0);
+	nv_wv32(vs->pd, pgt->pde * 8 + 4, 0);
 
-	if (!vs->isbar) {
-		pt->vo[0] = pscnv_vram_alloc(vs->dev, NVC0_VM_LPTE_COUNT * 8,
-					     PSCNV_VO_CONTIG, 0, 0x77779999);
-		if (!pt->vo[0])
-			return -ENOMEM;
-	}
-
-	pt->vo[1] = pscnv_vram_alloc(vs->dev, NVC0_VM_SPTE_COUNT * 8,
-				     PSCNV_VO_CONTIG, 0, 0x55559999);
-	if (!pt->vo[1])
-		return -ENOMEM;
-
-	if (!vs->isbar) {
-		pscnv_vspace_map3(pt->vo[0]);
-		pscnv_vspace_map3(pt->vo[1]);
-	}
-
-	if (pt->vo[0]) {
-		for (i = 0; i < NVC0_VM_LPTE_COUNT * 8; i += 4)
-			nv_wv32(pt->vo[0], i, 0);
-		nvc0_bar3_flush(vs->dev);
-	}
-
-	for (i = 0; i < NVC0_VM_SPTE_COUNT * 8; i += 4)
-		nv_wv32(pt->vo[1], i, 0);
-	nvc0_bar3_flush(vs->dev);
-
-	if (vs->isbar)
-		nv_wv32(vs->pd, pde * 8 + 0, 0x0);
-	else
-		nv_wv32(vs->pd, pde * 8 + 0, (pt->vo[0]->start >> 8) | 1);
-	nv_wv32(vs->pd, pde * 8 + 4, (pt->vo[1]->start >> 8) | 1);
-
-	nvc0_bar3_flush(vs->dev);
-	return nvc0_tlb_flush(vs);
+	kfree(pgt);
 }
 
 int
 nvc0_vspace_do_unmap(struct pscnv_vspace *vs, uint64_t offset, uint64_t size)
 {
-	const uint64_t end = offset + size;
 	uint32_t space;
 
-	for (; offset < end; offset += space) {
-		struct pscnv_ptab *pt;
+	for (; size; offset += space) {
+		struct pscnv_pgt *pt;
 		int i, pte;
-		const int pde = offset / NVC0_VM_BLOCK_SIZE;
 
-		pt = nvc0_vspace_ptab(vs, pde);
+		pt = nvc0_vspace_pgt(vs, NVC0_PDE(offset));
 		space = NVC0_VM_BLOCK_SIZE - (offset & NVC0_VM_BLOCK_MASK);
+		if (space > size)
+			space = size;
+		size -= space;
 
-		pte = (offset & NVC0_VM_BLOCK_MASK) >> NVC0_SPAGE_SHIFT;
+		pte = NVC0_SPTE(offset);
 		for (i = 0; i < (space >> NVC0_SPAGE_SHIFT) * 8; i += 4)
 			nv_wv32(pt->vo[1], pte * 8 + i, 0);
 
 		if (!pt->vo[0])
 			continue;
 
-		pte = (offset & NVC0_VM_BLOCK_MASK) >> NVC0_LPAGE_SHIFT;
+		pte = NVC0_LPTE(offset);
 		for (i = 0; i < (space >> NVC0_LPAGE_SHIFT) * 8; i += 4)
 			nv_wv32(pt->vo[0], pte * 8 + i, 0);
 	}
@@ -166,26 +176,43 @@ nvc0_vspace_do_unmap(struct pscnv_vspace *vs, uint64_t offset, uint64_t size)
 	return nvc0_tlb_flush(vs);
 }
 
+static inline void
+write_pt(struct pscnv_vo *pt, int pte, int count, uint64_t phys,
+	 int psz, uint32_t pfl0, uint32_t pfl1)
+{
+	int i;
+	uint32_t a = (phys >> 8) | pfl0;
+	uint32_t b = pfl1;
+
+	psz >>= 8;
+
+	for (i = pte * 8; i < (pte + count) * 8; i += 8, a += psz) {
+		nv_wv32(pt, i + 4, b);
+		nv_wv32(pt, i + 0, a);
+	}
+}
+
 int
 nvc0_vspace_do_map(struct pscnv_vspace *vs,
 		   struct pscnv_vo *vo, uint64_t offset)
 {
+	uint32_t pfl0, pfl1;
 	struct pscnv_vram_region *reg;
-	int pfl;
 
-	pfl = 1;
+	pfl0 = 1;
 	if (!vs->isbar && (vo->flags & PSCNV_VO_NOUSER))
-		pfl |= 2;
+		pfl0 |= 2;
+
+	pfl1 = vo->tile_flags << 4;
 
 	NV_DEBUG(vs->dev, "nvc0_vspace_do_map(%p, 0x%010llx)\n", vs, offset);
 
 	list_for_each_entry(reg, &vo->regions, local_list) {
 		uint32_t psh, psz;
-		int s;
-		uint64_t phys = reg->start, phys_end = reg->start + reg->size;
+		uint64_t phys = reg->start, size = reg->size;
 
-		s = ((reg->size | offset | phys) & NVC0_LPAGE_MASK) ? 1 : 0;
-		if (vs->isbar)
+		int s = ((size | offset | phys) & NVC0_LPAGE_MASK) ? 1 : 0;
+		if (vs->isbar == 3)
 			s = 1;
 	        psh = s ? NVC0_SPAGE_SHIFT : NVC0_LPAGE_SHIFT;
 		psz = 1 << psh;
@@ -194,17 +221,25 @@ nvc0_vspace_do_map(struct pscnv_vspace *vs,
 			 "VS %i 0x%010llx <-> (0x%08llx, %llx) (%x, %u)\n",
 			 vs->vid, offset, phys, reg->size, vo->tile_flags, psh);
 
-		for (phys = reg->start; phys < phys_end; phys += psz) {
-			struct pscnv_ptab *pt;
-			int pte = (offset & NVC0_VM_BLOCK_MASK) >> psh;
-			int pde = offset / NVC0_VM_BLOCK_SIZE;
+		while (size) {
+			struct pscnv_pgt *pt;
+			int pte, count;
+			uint32_t space;
 
-			pt = nvc0_vspace_ptab(vs, pde);
+			space = NVC0_VM_BLOCK_SIZE -
+				(offset & NVC0_VM_BLOCK_MASK);
+			if (space > size)
+				space = size;
+			size -= space;
 
-			nv_wv32(pt->vo[s], pte * 8 + 0, (phys >> 8) | pfl);
-			nv_wv32(pt->vo[s], pte * 8 + 4, vo->tile_flags);
+			pte = (offset & NVC0_VM_BLOCK_MASK) >> psh;
+			count = space >> psh;
+			pt = nvc0_vspace_pgt(vs, NVC0_PDE(offset));
 
-			offset += psz;
+			write_pt(pt->vo[s], pte, count, phys, psz, pfl0, pfl1);
+
+			offset += space;
+			phys += space;
 		}
 	}
 	nvc0_bar3_flush(vs->dev);
@@ -217,11 +252,11 @@ nvc0_vm_init_bar3(struct drm_device *dev)
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	struct pscnv_vspace *barvm = pscnv_vspace_new(dev);
 	struct pscnv_chan *barch;
-	struct pscnv_ptab *pt;
+	struct pscnv_pgt *pt;
 
 	if (!barvm)
 		return -ENOMEM;
-	barvm->isbar = 1;
+	barvm->isbar = 3;
 	dev_priv->bar3_vm = barvm;
 
 	barch = pscnv_chan_new(barvm);
@@ -240,7 +275,7 @@ nvc0_vm_init_bar3(struct drm_device *dev)
 		(0xc << 28) | (barch->vo->start >> 12));
 	nvc0_bar3_flush(dev);
 
-	pt = nvc0_vspace_ptab(barvm, 0);
+	pt = nvc0_vspace_pgt(barvm, 0);
 	if (!pt) {
 		NV_ERROR(dev, "failed to allocate RAMIN page table\n");
 		return -ENOMEM;
@@ -259,7 +294,7 @@ nvc0_vm_init_bar1(struct drm_device *dev)
 
 	if (!barvm)
 		return -ENOMEM;
-	barvm->isbar = 0; /* interpret as isbar3 for now */
+	barvm->isbar = 1;
 	dev_priv->bar1_vm = barvm;
 
 	barch = pscnv_chan_new(barvm);
@@ -268,6 +303,8 @@ nvc0_vm_init_bar1(struct drm_device *dev)
 		return -ENOMEM;
 	}
 	dev_priv->bar1_ch = barch;
+
+	pscnv_vspace_map3(barch->vo);
 
 	nv_wv32(barch->vo, 0x200, barvm->pd->start);
 	nv_wv32(barch->vo, 0x204, barvm->pd->start >> 32);
@@ -315,6 +352,10 @@ int
 nvc0_vm_takedown(struct drm_device *dev)
 {
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
+	struct pscnv_vspace *vs1 = dev_priv->bar1_vm;
+	struct pscnv_vspace *vs3 = dev_priv->bar3_vm;
+	struct pscnv_chan *ch1 = dev_priv->bar1_ch;
+	struct pscnv_chan *ch3 = dev_priv->bar3_ch;
 
 	dev_priv->bar1_vm = dev_priv->bar3_vm = NULL;
 	dev_priv->bar1_ch = dev_priv->bar3_ch = NULL;
@@ -322,10 +363,10 @@ nvc0_vm_takedown(struct drm_device *dev)
 	nv_wr32(dev, NVC0_PBUS_BAR1_CHAN, 0);
 	nv_wr32(dev, NVC0_PBUS_BAR3_CHAN, 0);
 
-	pscnv_chan_free(dev_priv->bar1_ch);
-	pscnv_chan_free(dev_priv->bar3_ch);
-	pscnv_vspace_free(dev_priv->bar1_vm);
-	pscnv_vspace_free(dev_priv->bar3_vm);
+	pscnv_chan_free(ch1);
+	pscnv_vspace_free(vs1);
+	pscnv_chan_free(ch3);
+	pscnv_vspace_free(vs3);
 
 	return 0;
 }

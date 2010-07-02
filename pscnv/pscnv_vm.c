@@ -211,6 +211,7 @@ pscnv_vspace_new (struct drm_device *dev)
 	return res;
 }
 
+
 void
 pscnv_vspace_free(struct pscnv_vspace *vs) {
 	int i;
@@ -226,6 +227,14 @@ pscnv_vspace_free(struct pscnv_vspace *vs) {
 		if (vs->pt[i]) {
 			pscnv_vram_free(vs->pt[i]);
 		}
+	}
+	if (vs->pd) {
+		for (i = 0; i < NVC0_PDE_HT_SIZE; i++) {
+			struct pscnv_pgt *pgt, *save;
+			list_for_each_entry_safe(pgt, save, &vs->ptht[i], head)
+				nvc0_pgt_del(vs, pgt);
+		}
+		pscnv_vram_free(vs->pd);
 	}
 	kfree(vs);
 }
@@ -275,6 +284,10 @@ pscnv_vm_takedown(struct drm_device *dev) {
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	struct pscnv_vspace *vs = dev_priv->bar3_vm;
 	struct pscnv_chan *ch = dev_priv->bar3_ch;
+
+	if (dev_priv->card_type >= NV_C0)
+		return nvc0_vm_takedown(dev);
+
 	/* XXX: write me. */
 	dev_priv->bar3_vm = dev_priv->bar1_vm = NULL;
 	dev_priv->bar3_ch = dev_priv->bar1_ch = NULL;

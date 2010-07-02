@@ -46,15 +46,20 @@
 #define NVC0_VM_SPTE_COUNT	(NVC0_VM_BLOCK_SIZE >> NVC0_SPAGE_SHIFT)
 #define NVC0_VM_LPTE_COUNT	(NVC0_VM_BLOCK_SIZE >> NVC0_LPAGE_SHIFT)
 
+#define NVC0_PDE(a)		((a) / NVC0_VM_BLOCK_SIZE)
+#define NVC0_SPTE(a)		(((a) & NVC0_VM_BLOCK_MASK) >> NVC0_SPAGE_SHIFT)
+#define NVC0_LPTE(a)		(((a) & NVC0_VM_BLOCK_MASK) >> NVC0_LPAGE_SHIFT)
+
 #define NVC0_PDE_HT_SIZE 32
 #define NVC0_PDE_HASH(n) (n % NVC0_PDE_HT_SIZE)
 
 PSCNV_RB_HEAD(pscnv_vm_maptree, pscnv_vm_mapnode);
 
-struct pscnv_ptab {
+struct pscnv_pgt {
 	struct list_head head;
 	unsigned int pde;
-	struct pscnv_vo *vo[2];
+	unsigned int limit; /* virtual range = NVC0_VM_BLOCK_SIZE >> limit */
+	struct pscnv_vo *vo[2]; /* 128 KiB and 4 KiB page tables */
 };
 
 struct pscnv_vspace {
@@ -123,6 +128,8 @@ int nvc0_vspace_do_unmap(struct pscnv_vspace *vs,
 int nvc0_vspace_do_map(struct pscnv_vspace *vs,
 		       struct pscnv_vo *vo, uint64_t offset);
 int nvc0_vm_init(struct drm_device *dev);
+int nvc0_vm_takedown(struct drm_device *dev);
+void nvc0_pgt_del(struct pscnv_vspace *vs, struct pscnv_pgt *pgt);
 
 /* needs vm_mutex held */
 struct pscnv_vspace *pscnv_get_vspace(struct drm_device *dev, struct drm_file *file_priv, int vid);
