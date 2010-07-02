@@ -32,10 +32,10 @@
 #define PSCNV_GETPARAM_PCI_VENDOR      3
 #define PSCNV_GETPARAM_PCI_DEVICE      4
 #define PSCNV_GETPARAM_BUS_TYPE        5
+#define PSCNV_GETPARAM_FB_SIZE         8
 #define PSCNV_GETPARAM_CHIPSET_ID      11
 #define PSCNV_GETPARAM_GRAPH_UNITS     13
 #define PSCNV_GETPARAM_PTIMER_TIME     14
-#define PSCNV_GETPARAM_VRAM_SIZE       15
 struct drm_pscnv_getparam {
 	uint64_t param;		/* < */
 	uint64_t value;		/* > */
@@ -117,6 +117,16 @@ struct drm_pscnv_fifo_init {
 	uint64_t pb_start;	/* < */
 };
 
+struct drm_pscnv_fifo_init_ib {
+	uint32_t cid;		/* < */
+	uint32_t pb_handle;	/* < */
+	uint32_t flags;		/* < */
+	uint32_t slimask;	/* < */
+	uint64_t ib_start;	/* < */
+	uint32_t ib_order;	/* < */
+	uint32_t _pad;
+};
+
 struct drm_pscnv_obj_gr_new {
 	uint32_t cid;		/* < */
 	uint32_t handle;	/* < */
@@ -137,5 +147,6 @@ struct drm_pscnv_obj_gr_new {
 #define DRM_PSCNV_OBJ_VDMA_NEW       0x28	/* Create a new vspace DMA object on a channel */
 #define DRM_PSCNV_FIFO_INIT          0x29	/* Initialises PFIFO processing on a channel */
 #define DRM_PSCNV_OBJ_GR_NEW         0x2a	/* Create a new GR object on a channel */
+#define DRM_PSCNV_FIFO_INIT_IB       0x2b	/* Initialises IB PFIFO processing on a channel */
 
 #endif /* __PSCNV_DRM_H__ */
