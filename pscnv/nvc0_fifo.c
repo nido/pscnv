@@ -55,7 +55,7 @@ nvc0_fifo_init_regs(struct drm_device *dev)
 	nv_wr32(dev, 0x0204, 7);
 	nv_wr32(dev, 0x2204, 7);
 
-	nv_wr32(dev, 0x12d0, 0x36); /* 0x32 on GTX 480 */
+	nv_wr32(dev, 0x12d0, dev_priv->fb_phys >> 26);
 
 	nv_wr32(dev, NVC0_PFIFO_POLL_AREA,
 		(1 << 28) | (dev_priv->fifo_vo->map1->start >> 12));
