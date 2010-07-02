@@ -40,7 +40,7 @@ extern int nvc0_fifo_init(struct drm_device *);
 extern int nvc0_fifo_takedown(struct drm_device *);
 void nvc0_pfifo_irq_handler(struct drm_device *dev);
 int nvc0_fifo_create(struct drm_device *dev, struct pscnv_chan *chan,
-		     struct drm_pscnv_fifo_init *req);
+		     struct drm_pscnv_fifo_init_ib *req);
 extern void nvc0_fifo_chan_free(struct pscnv_chan *ch);
 
 #endif

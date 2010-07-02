@@ -204,13 +204,16 @@ void nvc0_fifo_channel_disable(struct drm_device *dev, struct pscnv_chan *ch)
 	dev_priv->fifo_ctl[((chan)->cid * 0x1000 + ofst) / 4] = val
 
 int nvc0_fifo_create(struct drm_device *dev, struct pscnv_chan *chan,
-		     struct drm_pscnv_fifo_init *req)
+		     struct drm_pscnv_fifo_init_ib *req)
 {
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	int i, ret;
 	uint64_t fifo_regs = dev_priv->fifo_vo->start + (chan->cid << 12);
 
 	NV_INFO(dev, "%s\n", __FUNCTION__);
+
+	if (req->ib_order > 29)
+		return -EINVAL;
 
 	for (i = 0x40; i <= 0x50; i += 4)
 		nvchan_wr32(chan, i, 0);
@@ -231,9 +234,9 @@ int nvc0_fifo_create(struct drm_device *dev, struct pscnv_chan *chan,
 	nv_wv32(chan->vo, 0x08, fifo_regs);
 	nv_wv32(chan->vo, 0x0c, fifo_regs >> 32);
 
-	nv_wv32(chan->vo, 0x48, req->pb_start); /* IB */
+	nv_wv32(chan->vo, 0x48, req->ib_start); /* IB */
 	nv_wv32(chan->vo, 0x4c,
-		(req->pb_start >> 32) | (drm_order(0x2000) << 16));
+		(req->ib_start >> 32) | (req->ib_order << 16));
 	nv_wv32(chan->vo, 0x10, 0xface);
 	nv_wv32(chan->vo, 0x54, 0x2);
 	nv_wv32(chan->vo, 0x9c, 0x100);

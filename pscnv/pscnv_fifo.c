@@ -156,18 +156,15 @@ int pscnv_ioctl_fifo_init(struct drm_device *dev, void *data,
 
 	NOUVEAU_CHECK_INITIALISED_WITH_RETURN;
 
+	if (dev_priv->card_type >= NV_C0)
+		return -ENOSYS;
+
 	mutex_lock (&dev_priv->vm_mutex);
 
 	ch = pscnv_get_chan(dev, file_priv, req->cid);
 	if (!ch) {
 		mutex_unlock (&dev_priv->vm_mutex);
 		return -ENOENT;
-	}
-
-	if (dev_priv->card_type >= NV_C0) {
-		int ret = nvc0_fifo_create(dev, ch, req);
-		mutex_unlock (&dev_priv->vm_mutex);
-		return ret;
 	}
 
 	/* XXX: verify that we get a DMA object. */
@@ -249,6 +246,12 @@ int pscnv_ioctl_fifo_init_ib(struct drm_device *dev, void *data,
 	if (!ch) {
 		mutex_unlock (&dev_priv->vm_mutex);
 		return -ENOENT;
+	}
+
+	if (dev_priv->card_type >= NV_C0) {
+		int ret = nvc0_fifo_create(dev, ch, req);
+		mutex_unlock (&dev_priv->vm_mutex);
+		return ret;
 	}
 
 	/* XXX: verify that we get a DMA object. */
