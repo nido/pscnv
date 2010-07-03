@@ -170,7 +170,8 @@ void nvc0_ctxctl_load_ctxprog(struct drm_device *dev);
 static int
 nvc0_graph_init_ctxctl(struct drm_device *dev)
 {
-	uint32_t wait[3][2];
+    struct drm_nouveau_private *dev_priv = dev->dev_private;
+	uint32_t wait[3];
 	int i, j, tp_num, cx_num;
 
 	NV_DEBUG(dev, "%s\n", __FUNCTION__);
@@ -190,20 +191,22 @@ nvc0_graph_init_ctxctl(struct drm_device *dev)
 	nv_wr32(dev, 0x409500, 0x7fffffff);
 	nv_wr32(dev, 0x409504, 0x21);
 
-	wait[0][0] = 0x10;
-	wait[0][1] = 0x4cd00; /* grctx size, 0x50e00 on GTX 480 */
-	wait[1][0] = 0x16;
-	wait[1][1] = 0x62400;
-	wait[2][0] = 0x25;
-	wait[2][1] = 0x1800; /* 0x1900 on GTX 480 */
+	wait[0] = 0x10;
+	wait[1] = 0x16;
+	wait[2] = 0x25;
 
 	for (i = 0; i < 3; ++i) {
 		nv_wr32(dev, 0x409840, 0xffffffff);
 		nv_wr32(dev, 0x409500, 0);
-		nv_wr32(dev, 0x409504, wait[i][0]);
+		nv_wr32(dev, 0x409504, wait[i]);
 
-		if (!nv_wait(0x409800, ~0, wait[i][1]))
+		if (!nv_wait_neq(0x409800, ~0, 0x0))
 			NV_WARN(dev, "WARNING: PGRAPH 0x9800 stalled: %i\n", i);
+
+        if (wait[i] == 0x10) {
+            /* we may need one more round-up. */
+            dev_priv->grctx_size = (nv_rd32(dev, 0x409800) + 0xffff) & ~0xffff;
+        }
 	}
 
 	/* read stuff I don't know what it is */

@@ -502,6 +502,8 @@ extern int  pscnv_ioctl_getparam(struct drm_device *, void *data,
 				   struct drm_file *);
 extern bool nouveau_wait_until(struct drm_device *, uint64_t timeout,
 			       uint32_t reg, uint32_t mask, uint32_t val);
+extern bool nouveau_wait_until_neq(struct drm_device *, uint64_t timeout,
+			       uint32_t reg, uint32_t mask, uint32_t val);
 //extern bool nouveau_wait_for_idle(struct drm_device *);
 extern int  nouveau_card_init(struct drm_device *);
 
@@ -1013,6 +1015,9 @@ static inline void nv_wr08(struct drm_device *dev, unsigned reg, u8 val)
 
 #define nv_wait(reg, mask, val) \
 	nouveau_wait_until(dev, 2000000000ULL, (reg), (mask), (val))
+#define nv_wait_neq(reg, mask, val) \
+	nouveau_wait_until_neq(dev, 2000000000ULL, (reg), (mask), (val))
+
 #if 0 /* not removing yet - may be useful for pre-NV50 one day */
 /* PRAMIN access */
 static inline u32 nv_ri32(struct drm_device *dev, unsigned offset)

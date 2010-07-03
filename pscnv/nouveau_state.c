@@ -858,6 +858,23 @@ bool nouveau_wait_until(struct drm_device *dev, uint64_t timeout,
 
 	return false;
 }
+
+/* Wait until (value(reg) & mask) != val, up until timeout has hit */
+bool nouveau_wait_until_neq(struct drm_device *dev, uint64_t timeout,
+			uint32_t reg, uint32_t mask, uint32_t val)
+{
+	struct drm_nouveau_private *dev_priv = dev->dev_private;
+	struct nouveau_timer_engine *ptimer = &dev_priv->engine.timer;
+	uint64_t start = ptimer->read(dev);
+
+	do {
+		if ((nv_rd32(dev, reg) & mask) != val)
+			return true;
+	} while (ptimer->read(dev) - start < timeout);
+
+	return false;
+}
+
 #if 0
 /* Waits for PGRAPH to go completely idle */
 bool nouveau_wait_for_idle(struct drm_device *dev)
