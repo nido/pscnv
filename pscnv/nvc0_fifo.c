@@ -311,8 +311,9 @@ void nvc0_pfifo_irq_handler(struct drm_device *dev)
 {
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	uint32_t status;
+	unsigned long flags;
 
-	spin_lock(&dev_priv->pfifo_lock);
+	spin_lock_irqsave(&dev_priv->pfifo_lock, flags);
 	status = nv_rd32(dev, 0x2100);
 
 	if (status & 0x10000000) {
@@ -345,5 +346,5 @@ void nvc0_pfifo_irq_handler(struct drm_device *dev)
 
 	/* disable interrupts */
 	nv_wr32(dev, 0x2140, 0);
-	spin_unlock(&dev_priv->pfifo_lock);
+	spin_unlock_irqrestore(&dev_priv->pfifo_lock, flags);
 }

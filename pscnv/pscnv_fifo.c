@@ -111,11 +111,12 @@ void pscnv_fifo_playlist_update (struct drm_device *dev) {
 void pscnv_fifo_chan_free(struct pscnv_chan *ch) {
 	struct drm_device *dev = ch->vspace->dev;
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
+	unsigned long flags;
 
 	if (dev_priv->card_type >= NV_C0)
 		return nvc0_fifo_chan_free(ch);
 
-	spin_lock(&dev_priv->pfifo_lock);
+	spin_lock_irqsave(&dev_priv->pfifo_lock, flags);
 	nv_wr32(dev, 0x2600 + ch->cid * 4, nv_rd32(dev, 0x2600 + ch->cid * 4) & 0x3fffffff);
 	pscnv_fifo_playlist_update(dev);
 	nv_wr32(dev, 0x2504, 1);
@@ -144,7 +145,7 @@ void pscnv_fifo_chan_free(struct pscnv_chan *ch) {
 	}
 	nv_wr32(dev, 0x2600 + ch->cid * 4, 0);
 	nv_wr32(dev, 0x2504, 0);
-	spin_unlock(&dev_priv->pfifo_lock);
+	spin_unlock_irqrestore(&dev_priv->pfifo_lock, flags);
 }
 
 int pscnv_ioctl_fifo_init(struct drm_device *dev, void *data,
@@ -153,6 +154,7 @@ int pscnv_ioctl_fifo_init(struct drm_device *dev, void *data,
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	struct pscnv_chan *ch;
 	uint32_t pb_inst;
+	unsigned long flags;
 
 	NOUVEAU_CHECK_INITIALISED_WITH_RETURN;
 
@@ -174,7 +176,7 @@ int pscnv_ioctl_fifo_init(struct drm_device *dev, void *data,
 		return -ENOENT;
 	}
 
-	spin_lock(&dev_priv->pfifo_lock);
+	spin_lock_irqsave(&dev_priv->pfifo_lock, flags);
 
 	/* init RAMFC. */
 	nv_wv32(ch->vo, ch->ramfc + 0x00, 0);
@@ -225,7 +227,7 @@ int pscnv_ioctl_fifo_init(struct drm_device *dev, void *data,
 	}
 
 	pscnv_fifo_playlist_update(dev);
-	spin_unlock(&dev_priv->pfifo_lock);
+	spin_unlock_irqrestore(&dev_priv->pfifo_lock, flags);
 
 	mutex_unlock (&dev_priv->vm_mutex);
 	return 0;
@@ -237,6 +239,7 @@ int pscnv_ioctl_fifo_init_ib(struct drm_device *dev, void *data,
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	struct pscnv_chan *ch;
 	uint32_t pb_inst;
+	unsigned long flags;
 
 	NOUVEAU_CHECK_INITIALISED_WITH_RETURN;
 
@@ -261,7 +264,7 @@ int pscnv_ioctl_fifo_init_ib(struct drm_device *dev, void *data,
 		return -ENOENT;
 	}
 
-	spin_lock(&dev_priv->pfifo_lock);
+	spin_lock_irqsave(&dev_priv->pfifo_lock, flags);
 
 	/* init RAMFC. */
 	nv_wv32(ch->vo, ch->ramfc + 0x00, 0);
@@ -312,7 +315,7 @@ int pscnv_ioctl_fifo_init_ib(struct drm_device *dev, void *data,
 	}
 
 	pscnv_fifo_playlist_update(dev);
-	spin_unlock(&dev_priv->pfifo_lock);
+	spin_unlock_irqrestore(&dev_priv->pfifo_lock, flags);
 
 	mutex_unlock (&dev_priv->vm_mutex);
 	return 0;
@@ -322,7 +325,8 @@ void pscnv_fifo_irq_handler(struct drm_device *dev) {
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	uint32_t status;
 	int ch;
-	spin_lock(&dev_priv->pfifo_lock);
+	unsigned long flags;
+	spin_lock_irqsave(&dev_priv->pfifo_lock, flags);
 	status = nv_rd32(dev, 0x2100);
 	ch = nv_rd32(dev, 0x3204) & 0x7f;
 	if (status & 0x00000001) {
@@ -361,6 +365,8 @@ void pscnv_fifo_irq_handler(struct drm_device *dev) {
 		/* XXX: yup. a race. */
 		uint32_t put = nv_rd32(dev, 0x3240);
 		uint32_t puthi = nv_rd32(dev, 0x3320);
+		uint32_t ib_get = nv_rd32(dev, 0x3334);
+		uint32_t ib_put = nv_rd32(dev, 0x3330);
 		uint32_t dma_state = nv_rd32(dev, 0x3228);
 		uint32_t dma_push = nv_rd32(dev, 0x3220);
 		uint32_t st1 = nv_rd32(dev, 0x32a0);
@@ -368,10 +374,17 @@ void pscnv_fifo_irq_handler(struct drm_device *dev) {
 		uint32_t st3 = nv_rd32(dev, 0x32a8);
 		uint32_t st4 = nv_rd32(dev, 0x32ac);
 		uint32_t len = nv_rd32(dev, 0x3364);
-		NV_ERROR(dev, "PFIFO_DMA_PUSHER: ch %d addr %02x%08x [PUT %02x%08x] status %08x len %08x push %08x shadow %08x %08x %08x %08x\n",
-				ch, gethi, get, puthi, put, dma_state, len, dma_push, st1, st2, st3, st4);
-		nv_wr32(dev, 0x3244, put);
-		nv_wr32(dev, 0x3328, puthi);
+		NV_ERROR(dev, "PFIFO_DMA_PUSHER: ch %d addr %02x%08x [PUT %02x%08x], IB %08x [PUT %08x] status %08x len %08x push %08x shadow %08x %08x %08x %08x\n",
+				ch, gethi, get, puthi, put, ib_get, ib_put, dma_state, len, dma_push, st1, st2, st3, st4);
+		if (get != put || gethi != puthi) {
+			nv_wr32(dev, 0x3244, put);
+			nv_wr32(dev, 0x3328, puthi);
+		} else if (ib_get != ib_put) {
+			nv_wr32(dev, 0x3334, ib_put);
+		} else {
+			nv_wr32(dev, 0x3330, 0);
+			nv_wr32(dev, 0x3334, 0);
+		}
 		nv_wr32(dev, 0x3228, 0);
 		nv_wr32(dev, 0x3364, 0);
 		nv_wr32(dev, 0x3220, 1);
@@ -406,5 +419,5 @@ void pscnv_fifo_irq_handler(struct drm_device *dev) {
 		nv_wr32(dev, 0x2100, status);
 	}
 	pscnv_vm_trap(dev);
-	spin_unlock(&dev_priv->pfifo_lock);
+	spin_unlock_irqrestore(&dev_priv->pfifo_lock, flags);
 }
